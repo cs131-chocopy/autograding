@@ -52,10 +52,6 @@ const log = (text: string): void => {
   process.stdout.write(text + os.EOL)
 }
 
-const normalizeLineEndings = (text: string): string => {
-  return text.replace(/\r\n/gi, '\n').trim()
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const indent = (text: any): string => {
   let str = '' + new String(text)
@@ -124,7 +120,7 @@ const runSetup = async (test: Test, cwd: string, timeout: number): Promise<void>
   await waitForExit(setup, timeout)
 }
 
-const runCommand = async (test: Test, cwd: string, timeout: number): Promise<void> => {
+const runCommand = async (test: Test, cwd: string, timeout: number): Promise<number> => {
   const child = spawn(test.run, {
     cwd,
     shell: true,
@@ -156,36 +152,15 @@ const runCommand = async (test: Test, cwd: string, timeout: number): Promise<voi
 
   await waitForExit(child, timeout)
 
-  // Eventually work off the the test type
-  if ((!test.output || test.output == '') && (!test.input || test.input == '')) {
-    return
+  const regexp = /\[overall score: ([\d\.]*)\]\s*$/g
+  const match = regexp.exec(output)
+  if (match) {
+    return parseFloat(match[1])
   }
-
-  const expected = normalizeLineEndings(test.output || '')
-  const actual = normalizeLineEndings(output)
-
-  switch (test.comparison) {
-    case 'exact':
-      if (actual != expected) {
-        throw new TestOutputError(`The output for test ${test.name} did not match`, expected, actual)
-      }
-      break
-    case 'regex':
-      // Note: do not use expected here
-      if (!actual.match(new RegExp(test.output || ''))) {
-        throw new TestOutputError(`The output for test ${test.name} did not match`, test.output || '', actual)
-      }
-      break
-    default:
-      // The default comparison mode is 'included'
-      if (!actual.includes(expected)) {
-        throw new TestOutputError(`The output for test ${test.name} did not match`, expected, actual)
-      }
-      break
-  }
+  return 0
 }
 
-export const run = async (test: Test, cwd: string): Promise<void> => {
+export const run = async (test: Test, cwd: string): Promise<number> => {
   // Timeouts are in minutes, but need to be in ms
   let timeout = (test.timeout || 1) * 60 * 1000 || 30000
   const start = process.hrtime()
@@ -193,13 +168,12 @@ export const run = async (test: Test, cwd: string): Promise<void> => {
   const elapsed = process.hrtime(start)
   // Subtract the elapsed seconds (0) and nanoseconds (1) to find the remaining timeout
   timeout -= Math.floor(elapsed[0] * 1000 + elapsed[1] / 1000000)
-  await runCommand(test, cwd, timeout)
+  return await runCommand(test, cwd, timeout)
 }
 
 export const runAll = async (tests: Array<Test>, cwd: string): Promise<void> => {
   let points = 0
   let availablePoints = 0
-  let hasPoints = false
 
   // https://help.github.com/en/actions/reference/development-tools-for-github-actions#stop-and-start-log-commands-stop-commands
   const token = uuidv4()
@@ -212,18 +186,21 @@ export const runAll = async (tests: Array<Test>, cwd: string): Promise<void> => 
   for (const test of tests) {
     try {
       if (test.points) {
-        hasPoints = true
         availablePoints += test.points
       }
       log(color.cyan(`📝 ${test.name}`))
       log('')
-      await run(test, cwd)
+      const test_result = await run(test, cwd)
+      points += test_result
+      
       log('')
-      log(color.green(`✅ ${test.name}`))
-      log(``)
-      if (test.points) {
-        points += test.points
+      if (test_result === test.points) {
+        log(color.green(`✅ ${test.name}`))
+      } else {
+        failed = true
+        log(color.red(`❌ ${test.name}`))
       }
+      log('')
     } catch (error) {
       failed = true
       log('')
@@ -247,7 +224,7 @@ export const runAll = async (tests: Array<Test>, cwd: string): Promise<void> => 
   }
 
   // Set the number of points
-  if (hasPoints) {
+  if (points > 0) {
     const text = `Points ${points}/${availablePoints}`
     log(color.bold.bgCyan.black(text))
     core.setOutput('Points', `${points}/${availablePoints}`)
