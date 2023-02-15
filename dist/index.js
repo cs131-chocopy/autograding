@@ -11442,6 +11442,7 @@ exports.runAll = async (tests, cwd) => {
         log('');
     }
     // Set the number of points
+    points = Math.round(points);
     if (points > 0) {
         const text = `Points ${points}/${availablePoints}`;
         log(color.bold.bgCyan.black(text));

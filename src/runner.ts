@@ -224,6 +224,7 @@ export const runAll = async (tests: Array<Test>, cwd: string): Promise<void> => 
   }
 
   // Set the number of points
+  points = Math.round(points)
   if (points > 0) {
     const text = `Points ${points}/${availablePoints}`
     log(color.bold.bgCyan.black(text))
